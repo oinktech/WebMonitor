@@ -18,6 +18,9 @@ db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 
+# 用于追踪访问线程的全局变量
+thread_dict = {}
+
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -32,8 +35,21 @@ class Website(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-def visit_website(url, interval):
-    while True:
+# 用于停止线程的标志
+class StoppableThread(threading.Thread):
+    def __init__(self, *args, **kwargs):
+        super(StoppableThread, self).__init__(*args, **kwargs)
+        self._stop_event = threading.Event()
+
+    def stop(self):
+        self._stop_event.set()
+
+    def stopped(self):
+        return self._stop_event.is_set()
+
+# 网站访问线程函数
+def visit_website(url, interval, stop_event):
+    while not stop_event.is_set():
         time.sleep(interval)
         try:
             response = requests.get(url)
@@ -109,7 +125,13 @@ def add_website():
     new_website = Website(url=url, interval=interval)
     db.session.add(new_website)
     db.session.commit()
-    threading.Thread(target=visit_website, args=(url, interval)).start()
+
+    # 创建线程并保存到字典中
+    stop_event = threading.Event()
+    thread = threading.Thread(target=visit_website, args=(url, interval, stop_event))
+    thread.start()
+    thread_dict[new_website.id] = (thread, stop_event)
+
     flash('網站已添加！', 'success')
     return redirect(url_for('home'))
 
@@ -118,9 +140,15 @@ def add_website():
 def delete_website(id):
     website = Website.query.get(id)
     if website:
+        # 停止线程
+        if id in thread_dict:
+            thread, stop_event = thread_dict.pop(id)
+            stop_event.set()  # 设置停止标志，终止线程
+            thread.join()  # 等待线程安全结束
+
         db.session.delete(website)
         db.session.commit()
-        flash('網站已刪除！', 'success')
+        flash('網站已刪除並停止訪問！', 'success')
     else:
         flash('網站不存在！', 'danger')
     return redirect(url_for('home'))
