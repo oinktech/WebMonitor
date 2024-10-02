@@ -31,6 +31,9 @@
                 </div>
             {% endif %}
         {% endwith %}
+                        <form action="{{ url_for('toggle_notify') }}" method="post">
+    <button type="submit">{{ '關閉通知' if notify else '開啟通知' }}</button>
+</form>
 
         <div class="card">
             <div class="card-header">
