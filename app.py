@@ -65,10 +65,23 @@ def register():
         flash('用戶名已存在！', 'danger')
         return redirect(url_for('home'))
 
-    new_user = User(username=username, password=generate_password_hash(password, method='sha256'))
+    # 移除 method 参数
+    new_user = User(username=username, password=generate_password_hash(password))
     db.session.add(new_user)
     db.session.commit()
     flash('註冊成功！請登入。', 'success')
+    return redirect(url_for('home'))
+
+def login():
+    username = request.form.get('username')
+    password = request.form.get('password')
+    user = User.query.filter_by(username=username).first()
+    
+    if user and check_password_hash(user.password, password):  # 这里也不需要 method
+        login_user(user)
+        return redirect(url_for('home'))
+    
+    flash('登入失敗，請檢查用戶名和密碼。', 'danger')
     return redirect(url_for('home'))
 
 def login():
