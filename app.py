@@ -7,9 +7,8 @@ import time
 import requests
 import os
 from dotenv import load_dotenv
-from datetime import datetime
 
-# Load environment variables from .env file
+# 加载环境变量
 load_dotenv()
 
 app = Flask(__name__)
@@ -23,7 +22,6 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(150), nullable=False)
-    notifications_enabled = db.Column(db.Boolean, default=True)  # 新增字段：是否启用通知
 
 class Website(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -41,30 +39,23 @@ def visit_website(url, interval):
             response = requests.get(url)
             if response.status_code == 200:
                 print(f"成功访问: {url}")
-                if current_user.is_authenticated and current_user.notifications_enabled:
-                    # 发送通知
-                    notify_user(url)
             else:
                 print(f"访问失败: {url}, 状态码: {response.status_code}")
         except Exception as e:
             print(f"访问 {url} 时发生错误: {e}")
-
-def notify_user(url):
-    # 发送通知逻辑，这里可以用其他的通知服务
-    print(f"通知: 成功访问 {url} at {datetime.now()}")
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
     if current_user.is_authenticated:
         websites = Website.query.all()
         return render_template('dashboard.html', websites=websites)
-    
+
     if request.method == 'POST':
         if 'register' in request.form:
             return register()
         elif 'login' in request.form:
             return login()
-    
+
     return render_template('index.html')
 
 def register():
@@ -132,15 +123,6 @@ def delete_website(id):
         flash('網站已刪除！', 'success')
     else:
         flash('網站不存在！', 'danger')
-    return redirect(url_for('home'))
-
-@app.route('/toggle_notifications', methods=['POST'])
-@login_required
-def toggle_notifications():
-    current_user.notifications_enabled = not current_user.notifications_enabled
-    db.session.commit()
-    status = "啟用" if current_user.notifications_enabled else "禁用"
-    flash(f'通知已{status}！', 'success')
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
