@@ -1,39 +1,35 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
-from flask_sqlalchemy import SQLAlchemy
+from flask_pymongo import PyMongo
 from flask_login import UserMixin, LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import threading
 import time
 import requests
-from pymongo import MongoClient
 import os
 from dotenv import load_dotenv
 
-# 加载环境变量
+# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+app.config['MONGO_URI'] = os.getenv('MONGO_URI')  # Load MongoDB URI from .env file
 app.config['SECRET_KEY'] = 'your_secret_key'
-db_client = MongoClient(os.getenv('MONGODB_URI'))
-db = db_client['website_monitor']
+mongo = PyMongo(app)
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-class User(db['users']):
+class User(UserMixin):
     def __init__(self, username, password):
         self.username = username
-        self.password = generate_password_hash(password)
-
-class Website:
-    def __init__(self, url, interval):
-        self.url = url
-        self.interval = interval
-        self.notifications_enabled = True  # 默认为开启状态
+        self.password = password
 
 @login_manager.user_loader
 def load_user(user_id):
-    user_data = db['users'].find_one({"_id": user_id})
-    return User(user_data['username'], user_data['password']) if user_data else None
+    user_data = mongo.db.users.find_one({"_id": user_id})
+    if user_data:
+        return User(username=user_data['username'], password=user_data['password'])
+    return None
 
 def visit_website(url, interval):
     while True:
@@ -42,21 +38,20 @@ def visit_website(url, interval):
             response = requests.get(url)
             if response.status_code == 200:
                 print(f"成功访问: {url}")
-                if current_user.is_authenticated:
-                    notify_user(url)  # 发送通知
+                if mongo.db.websites.find_one({"url": url, "notifications_enabled": True}):
+                    notify_user(url)
             else:
                 print(f"访问失败: {url}, 状态码: {response.status_code}")
         except Exception as e:
             print(f"访问 {url} 时发生错误: {e}")
 
 def notify_user(url):
-    # 假设这里实现了发送通知的逻辑
-    print(f"发送通知: {url} 被访问于 {time.ctime()}")
+    print(f"通知: 成功访问 {url} at {time.ctime()}")
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
     if current_user.is_authenticated:
-        websites = db['websites'].find()
+        websites = mongo.db.websites.find()
         return render_template('dashboard.html', websites=websites)
 
     if request.method == 'POST':
@@ -75,24 +70,26 @@ def register():
         flash('用戶名和密碼不可為空！', 'danger')
         return redirect(url_for('home'))
 
-    if db['users'].find_one({"username": username}):
+    if mongo.db.users.find_one({"username": username}):
         flash('用戶名已存在！', 'danger')
         return redirect(url_for('home'))
 
-    new_user = User(username=username, password=password)
-    db['users'].insert_one({"username": username, "password": new_user.password})
+    mongo.db.users.insert_one({
+        "username": username,
+        "password": generate_password_hash(password, method='pbkdf2:sha256')
+    })
     flash('註冊成功！請登入。', 'success')
     return redirect(url_for('home'))
 
 def login():
     username = request.form.get('username')
     password = request.form.get('password')
-    user_data = db['users'].find_one({"username": username})
-    
+    user_data = mongo.db.users.find_one({"username": username})
+
     if user_data and check_password_hash(user_data['password'], password):
-        login_user(User(username, user_data['password']))
+        login_user(User(username=username, password=user_data['password']))
         return redirect(url_for('home'))
-    
+
     flash('登入失敗，請檢查用戶名和密碼。', 'danger')
     return redirect(url_for('home'))
 
@@ -114,8 +111,7 @@ def add_website():
         return redirect(url_for('home'))
 
     interval = int(interval)
-    new_website = Website(url=url, interval=interval)
-    db['websites'].insert_one({"url": url, "interval": interval, "notifications_enabled": True})
+    mongo.db.websites.insert_one({"url": url, "interval": interval, "notifications_enabled": False})
     threading.Thread(target=visit_website, args=(url, interval)).start()
     flash('網站已添加！', 'success')
     return redirect(url_for('home'))
@@ -123,21 +119,19 @@ def add_website():
 @app.route('/delete_website/<string:url>', methods=['POST'])
 @login_required
 def delete_website(url):
-    result = db['websites'].delete_one({"url": url})
-    if result.deleted_count > 0:
-        flash('網站已刪除！', 'success')
-    else:
-        flash('網站不存在！', 'danger')
+    mongo.db.websites.delete_one({"url": url})
+    flash('網站已刪除！', 'success')
     return redirect(url_for('home'))
 
 @app.route('/toggle_notifications/<string:url>', methods=['POST'])
 @login_required
 def toggle_notifications(url):
-    website = db['websites'].find_one({"url": url})
+    website = mongo.db.websites.find_one({"url": url})
     if website:
-        new_state = not website['notifications_enabled']
-        db['websites'].update_one({"url": url}, {"$set": {"notifications_enabled": new_state}})
-        flash(f'通知已{"開啟" if new_state else "關閉"}！', 'success')
+        current_state = website.get("notifications_enabled", False)
+        new_state = not current_state
+        mongo.db.websites.update_one({"url": url}, {"$set": {"notifications_enabled": new_state}})
+        flash('通知狀態已更新！', 'success')
     else:
         flash('網站不存在！', 'danger')
     return redirect(url_for('home'))
