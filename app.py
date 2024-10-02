@@ -22,12 +22,16 @@ class Website(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     url = db.Column(db.String(300), nullable=False)
     interval = db.Column(db.Integer, nullable=False)  # 访问间隔（秒）
+    is_active = db.Column(db.Boolean, default=True)  # 用于标记网站是否处于活动状态
+
+# 存储活动线程
+active_threads = {}
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-def visit_website(url, interval):
+def visit_website(url, interval, website_id):
     while True:
         time.sleep(interval)
         try:
@@ -38,6 +42,9 @@ def visit_website(url, interval):
                 print(f"访问失败: {url}, 状态码: {response.status_code}")
         except Exception as e:
             print(f"访问 {url} 时发生错误: {e}")
+        # 检查网站是否被标记为不活动
+        if not active_threads.get(website_id, True):
+            break
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
@@ -65,23 +72,10 @@ def register():
         flash('用戶名已存在！', 'danger')
         return redirect(url_for('home'))
 
-    # 移除 method 参数
     new_user = User(username=username, password=generate_password_hash(password))
     db.session.add(new_user)
     db.session.commit()
     flash('註冊成功！請登入。', 'success')
-    return redirect(url_for('home'))
-
-def login():
-    username = request.form.get('username')
-    password = request.form.get('password')
-    user = User.query.filter_by(username=username).first()
-    
-    if user and check_password_hash(user.password, password):  # 这里也不需要 method
-        login_user(user)
-        return redirect(url_for('home'))
-    
-    flash('登入失敗，請檢查用戶名和密碼。', 'danger')
     return redirect(url_for('home'))
 
 def login():
@@ -109,7 +103,7 @@ def add_website():
     url = request.form.get('url')
     interval = request.form.get('interval')
 
-    if not url or not interval.isdigit() or int(interval) <= 0:
+    if not url or not interval.isdigit():
         flash('請正確填寫網站 URL 和訪問間隔！', 'danger')
         return redirect(url_for('home'))
 
@@ -118,8 +112,10 @@ def add_website():
     db.session.add(new_website)
     db.session.commit()
 
-    # 启动新线程访问网站
-    threading.Thread(target=visit_website, args=(url, interval), daemon=True).start()
+    # 启动访问线程
+    website_id = new_website.id
+    active_threads[website_id] = True  # 标记为活动
+    threading.Thread(target=visit_website, args=(url, interval, website_id)).start()
 
     flash('網站已添加！', 'success')
     return redirect(url_for('home'))
@@ -129,6 +125,8 @@ def add_website():
 def delete_website(id):
     website = Website.query.get(id)
     if website:
+        # 标记网站为不活动
+        active_threads[id] = False
         db.session.delete(website)
         db.session.commit()
         flash('網站已刪除！', 'success')
