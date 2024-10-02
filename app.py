@@ -124,5 +124,6 @@ def delete_website(id):
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
-    db.create_all()  # 创建数据库表
+    with app.app_context():
+        db.create_all()  # 创建数据库表
     app.run(debug=True, port=10000, host='0.0.0.0')
