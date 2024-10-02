@@ -122,4 +122,4 @@ def delete_website(id):
 
 if __name__ == '__main__':
     db.create_all()  # 创建数据库表
-    app.run(debug=True)
+    app.run(debug=True,port=10000, host='0.0.0.0')
