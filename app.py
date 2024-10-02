@@ -5,109 +5,92 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import threading
 import time
 import requests
-import smtplib
-from email.mime.text import MIMEText
+from pymongo import MongoClient
+import os
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SECRET_KEY'] = 'your_secret_key'
-db = SQLAlchemy(app)
+db_client = MongoClient(os.getenv('MONGODB_URI'))
+db = db_client['website_monitor']
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(150), unique=True, nullable=False)
-    password = db.Column(db.String(150), nullable=False)
-    email = db.Column(db.String(150), nullable=False)  # 添加用户电子邮件
-    notify = db.Column(db.Boolean, default=False)  # 通知开关
+class User(db['users']):
+    def __init__(self, username, password):
+        self.username = username
+        self.password = generate_password_hash(password)
 
-class Website(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    url = db.Column(db.String(300), nullable=False)
-    interval = db.Column(db.Integer, nullable=False)  # 访问间隔（秒）
-    is_active = db.Column(db.Boolean, default=True)  # 用于标记网站是否处于活动状态
-
-# 存储活动线程
-active_threads = {}
+class Website:
+    def __init__(self, url, interval):
+        self.url = url
+        self.interval = interval
+        self.notifications_enabled = True  # 默认为开启状态
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    user_data = db['users'].find_one({"_id": user_id})
+    return User(user_data['username'], user_data['password']) if user_data else None
 
-def send_notification(email, url):
-    msg = MIMEText(f"成功访问: {url}，访问时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-    msg['Subject'] = '网站访问通知'
-    msg['From'] = 'your_email@example.com'  # 发送者的电子邮件地址
-    msg['To'] = email
-
-    try:
-        with smtplib.SMTP('smtp.example.com', 587) as server:  # 替换为您的SMTP服务器
-            server.starttls()
-            server.login('your_email@example.com', 'your_email_password')  # 发送者的电子邮件和密码
-            server.send_message(msg)
-    except Exception as e:
-        print(f"发送通知时发生错误: {e}")
-
-def visit_website(url, interval, website_id):
+def visit_website(url, interval):
     while True:
         time.sleep(interval)
         try:
             response = requests.get(url)
             if response.status_code == 200:
                 print(f"成功访问: {url}")
-                # 发送通知
-                user = current_user
-                if user.notify:
-                    send_notification(user.email, url)
+                if current_user.is_authenticated:
+                    notify_user(url)  # 发送通知
             else:
                 print(f"访问失败: {url}, 状态码: {response.status_code}")
         except Exception as e:
             print(f"访问 {url} 时发生错误: {e}")
-        # 检查网站是否被标记为不活动
-        if not active_threads.get(website_id, True):
-            break
+
+def notify_user(url):
+    # 假设这里实现了发送通知的逻辑
+    print(f"发送通知: {url} 被访问于 {time.ctime()}")
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
     if current_user.is_authenticated:
-        websites = Website.query.all()
-        return render_template('dashboard.html', websites=websites, notify=current_user.notify)
-    
+        websites = db['websites'].find()
+        return render_template('dashboard.html', websites=websites)
+
     if request.method == 'POST':
         if 'register' in request.form:
             return register()
         elif 'login' in request.form:
             return login()
-    
+
     return render_template('index.html')
 
 def register():
     username = request.form.get('username')
     password = request.form.get('password')
-    email = request.form.get('email')  # 获取电子邮件
 
-    if not username or not password or not email:
-        flash('用戶名、密碼和電子郵件不可為空！', 'danger')
+    if not username or not password:
+        flash('用戶名和密碼不可為空！', 'danger')
         return redirect(url_for('home'))
 
-    if User.query.filter_by(username=username).first():
+    if db['users'].find_one({"username": username}):
         flash('用戶名已存在！', 'danger')
         return redirect(url_for('home'))
 
-    new_user = User(username=username, password=generate_password_hash(password), email=email)
-    db.session.add(new_user)
-    db.session.commit()
+    new_user = User(username=username, password=password)
+    db['users'].insert_one({"username": username, "password": new_user.password})
     flash('註冊成功！請登入。', 'success')
     return redirect(url_for('home'))
 
 def login():
     username = request.form.get('username')
     password = request.form.get('password')
-    user = User.query.filter_by(username=username).first()
+    user_data = db['users'].find_one({"username": username})
     
-    if user and check_password_hash(user.password, password):
-        login_user(user)
+    if user_data and check_password_hash(user_data['password'], password):
+        login_user(User(username, user_data['password']))
         return redirect(url_for('home'))
     
     flash('登入失敗，請檢查用戶名和密碼。', 'danger')
@@ -132,41 +115,32 @@ def add_website():
 
     interval = int(interval)
     new_website = Website(url=url, interval=interval)
-    db.session.add(new_website)
-    db.session.commit()
-
-    # 启动访问线程
-    website_id = new_website.id
-    active_threads[website_id] = True  # 标记为活动
-    threading.Thread(target=visit_website, args=(url, interval, website_id)).start()
-
+    db['websites'].insert_one({"url": url, "interval": interval, "notifications_enabled": True})
+    threading.Thread(target=visit_website, args=(url, interval)).start()
     flash('網站已添加！', 'success')
     return redirect(url_for('home'))
 
-@app.route('/delete_website/<int:id>', methods=['POST'])
+@app.route('/delete_website/<string:url>', methods=['POST'])
 @login_required
-def delete_website(id):
-    website = Website.query.get(id)
-    if website:
-        # 标记网站为不活动
-        active_threads[id] = False
-        db.session.delete(website)
-        db.session.commit()
+def delete_website(url):
+    result = db['websites'].delete_one({"url": url})
+    if result.deleted_count > 0:
         flash('網站已刪除！', 'success')
     else:
         flash('網站不存在！', 'danger')
     return redirect(url_for('home'))
 
-@app.route('/toggle_notify', methods=['POST'])
+@app.route('/toggle_notifications/<string:url>', methods=['POST'])
 @login_required
-def toggle_notify():
-    user = current_user
-    user.notify = not user.notify
-    db.session.commit()
-    flash('通知已更新！', 'success')
+def toggle_notifications(url):
+    website = db['websites'].find_one({"url": url})
+    if website:
+        new_state = not website['notifications_enabled']
+        db['websites'].update_one({"url": url}, {"$set": {"notifications_enabled": new_state}})
+        flash(f'通知已{"開啟" if new_state else "關閉"}！', 'success')
+    else:
+        flash('網站不存在！', 'danger')
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()  # 创建数据库表
     app.run(debug=True, port=10000, host='0.0.0.0')
