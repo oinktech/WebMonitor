@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>網站管理系統</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .container {
+            margin-top: 50px;
+            transition: all 0.5s ease;
+        }
+        .alert {
+            transition: all 0.5s ease;
+        }
+        .form-control {
+            transition: border-color 0.5s ease;
+        }
+        .form-control:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 5px rgba(0, 123, 255, .5);
+        }
+        .btn {
+            transition: background-color 0.5s ease;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">網站管理系統</h1>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="alert alert-warning" role="alert">
+                    {{ messages[0] }}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% if current_user.is_authenticated %}
+            <h2>歡迎，{{ current_user.username }}！</h2>
+            <form method="POST" action="{{ url_for('add_website') }}">
+                <input type="text" name="url" placeholder="網站 URL" required class="form-control mb-2">
+                <input type="number" name="interval" placeholder="訪問間隔（秒）" required class="form-control mb-2">
+                <button type="submit" class="btn btn-primary">添加網站</button>
+            </form>
+            <h2 class="mt-4">管理的網站</h2>
+            <ul class="list-group">
+                {% for website in websites %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        {{ website.url }} - 每 {{ website.interval }} 秒訪問
+                        <form method="POST" action="{{ url_for('delete_website', id=website.id) }}" style="display:inline;">
+                            <button type="submit" class="btn btn-danger btn-sm">刪除</button>
+                        </form>
+                    </li>
+                {% endfor %}
+            </ul>
+            <form method="POST" action="{{ url_for('logout') }}" class="mt-4">
+                <button type="submit" class="btn btn-secondary">登出</button>
+            </form>
+        {% else %}
+            <form method="POST">
+                <h3>註冊</h3>
+                <input type="text" name="username" placeholder="用戶名" required class="form-control mb-2">
+                <input type="password" name="password" placeholder="密碼" required class="form-control mb-2">
+                <button type="submit" name="register" class="btn btn-success">註冊</button>
+            </form>
+            <form method="POST" class="mt-4">
+                <h3>登入</h3>
+                <input type="text" name="username" placeholder="用戶名" required class="form-control mb-2">
+                <input type="password" name="password" placeholder="密碼" required class="form-control mb-2">
+                <button type="submit" name="login" class="btn btn-primary">登入</button>
+            </form>
+        {% endif %}
+    </div>
+</body>
+</html>
