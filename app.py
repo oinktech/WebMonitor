@@ -5,6 +5,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import threading
 import time
 import requests
+import smtplib
+from email.mime.text import MIMEText
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
@@ -17,6 +19,8 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(150), nullable=False)
+    email = db.Column(db.String(150), nullable=False)  # 添加用户电子邮件
+    notify = db.Column(db.Boolean, default=False)  # 通知开关
 
 class Website(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -31,6 +35,20 @@ active_threads = {}
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+def send_notification(email, url):
+    msg = MIMEText(f"成功访问: {url}，访问时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    msg['Subject'] = '网站访问通知'
+    msg['From'] = 'your_email@example.com'  # 发送者的电子邮件地址
+    msg['To'] = email
+
+    try:
+        with smtplib.SMTP('smtp.example.com', 587) as server:  # 替换为您的SMTP服务器
+            server.starttls()
+            server.login('your_email@example.com', 'your_email_password')  # 发送者的电子邮件和密码
+            server.send_message(msg)
+    except Exception as e:
+        print(f"发送通知时发生错误: {e}")
+
 def visit_website(url, interval, website_id):
     while True:
         time.sleep(interval)
@@ -38,6 +56,10 @@ def visit_website(url, interval, website_id):
             response = requests.get(url)
             if response.status_code == 200:
                 print(f"成功访问: {url}")
+                # 发送通知
+                user = current_user
+                if user.notify:
+                    send_notification(user.email, url)
             else:
                 print(f"访问失败: {url}, 状态码: {response.status_code}")
         except Exception as e:
@@ -50,7 +72,7 @@ def visit_website(url, interval, website_id):
 def home():
     if current_user.is_authenticated:
         websites = Website.query.all()
-        return render_template('dashboard.html', websites=websites)
+        return render_template('dashboard.html', websites=websites, notify=current_user.notify)
     
     if request.method == 'POST':
         if 'register' in request.form:
@@ -63,16 +85,17 @@ def home():
 def register():
     username = request.form.get('username')
     password = request.form.get('password')
+    email = request.form.get('email')  # 获取电子邮件
 
-    if not username or not password:
-        flash('用戶名和密碼不可為空！', 'danger')
+    if not username or not password or not email:
+        flash('用戶名、密碼和電子郵件不可為空！', 'danger')
         return redirect(url_for('home'))
 
     if User.query.filter_by(username=username).first():
         flash('用戶名已存在！', 'danger')
         return redirect(url_for('home'))
 
-    new_user = User(username=username, password=generate_password_hash(password))
+    new_user = User(username=username, password=generate_password_hash(password), email=email)
     db.session.add(new_user)
     db.session.commit()
     flash('註冊成功！請登入。', 'success')
@@ -132,6 +155,15 @@ def delete_website(id):
         flash('網站已刪除！', 'success')
     else:
         flash('網站不存在！', 'danger')
+    return redirect(url_for('home'))
+
+@app.route('/toggle_notify', methods=['POST'])
+@login_required
+def toggle_notify():
+    user = current_user
+    user.notify = not user.notify
+    db.session.commit()
+    flash('通知已更新！', 'success')
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
