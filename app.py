@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
-from flask_pymongo import PyMongo
+from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin, LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import threading
@@ -7,29 +7,32 @@ import time
 import requests
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
-app.config['MONGO_URI'] = os.getenv('MONGO_URI')  # Load MongoDB URI from .env file
-app.config['SECRET_KEY'] = 'your_secret_key'
-mongo = PyMongo(app)
-
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your_default_secret_key')
+db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-class User(UserMixin):
-    def __init__(self, username, password):
-        self.username = username
-        self.password = password
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(150), nullable=False)
+    notifications_enabled = db.Column(db.Boolean, default=True)  # 新增字段：是否启用通知
+
+class Website(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    url = db.Column(db.String(300), nullable=False)
+    interval = db.Column(db.Integer, nullable=False)  # 访问间隔（秒）
 
 @login_manager.user_loader
 def load_user(user_id):
-    user_data = mongo.db.users.find_one({"_id": user_id})  # Ensure user_id is used correctly
-    if user_data:
-        return User(username=user_data['username'], password=user_data['password'])
-    return None
+    return User.query.get(int(user_id))
 
 def visit_website(url, interval):
     while True:
@@ -38,7 +41,8 @@ def visit_website(url, interval):
             response = requests.get(url)
             if response.status_code == 200:
                 print(f"成功访问: {url}")
-                if mongo.db.websites.find_one({"url": url, "notifications_enabled": True}):
+                if current_user.is_authenticated and current_user.notifications_enabled:
+                    # 发送通知
                     notify_user(url)
             else:
                 print(f"访问失败: {url}, 状态码: {response.status_code}")
@@ -46,20 +50,21 @@ def visit_website(url, interval):
             print(f"访问 {url} 时发生错误: {e}")
 
 def notify_user(url):
-    print(f"通知: 成功访问 {url} at {time.ctime()}")
+    # 发送通知逻辑，这里可以用其他的通知服务
+    print(f"通知: 成功访问 {url} at {datetime.now()}")
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
     if current_user.is_authenticated:
-        websites = mongo.db.websites.find()
+        websites = Website.query.all()
         return render_template('dashboard.html', websites=websites)
-
+    
     if request.method == 'POST':
         if 'register' in request.form:
             return register()
         elif 'login' in request.form:
             return login()
-
+    
     return render_template('index.html')
 
 def register():
@@ -70,26 +75,25 @@ def register():
         flash('用戶名和密碼不可為空！', 'danger')
         return redirect(url_for('home'))
 
-    if mongo.db.users.find_one({"username": username}):
+    if User.query.filter_by(username=username).first():
         flash('用戶名已存在！', 'danger')
         return redirect(url_for('home'))
 
-    mongo.db.users.insert_one({
-        "username": username,
-        "password": generate_password_hash(password, method='pbkdf2:sha256')
-    })
+    new_user = User(username=username, password=generate_password_hash(password, method='pbkdf2:sha256'))
+    db.session.add(new_user)
+    db.session.commit()
     flash('註冊成功！請登入。', 'success')
     return redirect(url_for('home'))
 
 def login():
     username = request.form.get('username')
     password = request.form.get('password')
-    user_data = mongo.db.users.find_one({"username": username})
-
-    if user_data and check_password_hash(user_data['password'], password):
-        login_user(User(username=username, password=user_data['password']))
+    user = User.query.filter_by(username=username).first()
+    
+    if user and check_password_hash(user.password, password):
+        login_user(user)
         return redirect(url_for('home'))
-
+    
     flash('登入失敗，請檢查用戶名和密碼。', 'danger')
     return redirect(url_for('home'))
 
@@ -111,30 +115,35 @@ def add_website():
         return redirect(url_for('home'))
 
     interval = int(interval)
-    mongo.db.websites.insert_one({"url": url, "interval": interval, "notifications_enabled": False})
-    threading.Thread(target=visit_website, args=(url, interval), daemon=True).start()  # Make thread a daemon
+    new_website = Website(url=url, interval=interval)
+    db.session.add(new_website)
+    db.session.commit()
+    threading.Thread(target=visit_website, args=(url, interval)).start()
     flash('網站已添加！', 'success')
     return redirect(url_for('home'))
 
-@app.route('/delete_website/<string:url>', methods=['POST'])
+@app.route('/delete_website/<int:id>', methods=['POST'])
 @login_required
-def delete_website(url):
-    mongo.db.websites.delete_one({"url": url})
-    flash('網站已刪除！', 'success')
-    return redirect(url_for('home'))
-
-@app.route('/toggle_notifications/<string:url>', methods=['POST'])
-@login_required
-def toggle_notifications(url):
-    website = mongo.db.websites.find_one({"url": url})
+def delete_website(id):
+    website = Website.query.get(id)
     if website:
-        current_state = website.get("notifications_enabled", False)
-        new_state = not current_state
-        mongo.db.websites.update_one({"url": url}, {"$set": {"notifications_enabled": new_state}})
-        flash('通知狀態已更新！', 'success')
+        db.session.delete(website)
+        db.session.commit()
+        flash('網站已刪除！', 'success')
     else:
         flash('網站不存在！', 'danger')
     return redirect(url_for('home'))
 
+@app.route('/toggle_notifications', methods=['POST'])
+@login_required
+def toggle_notifications():
+    current_user.notifications_enabled = not current_user.notifications_enabled
+    db.session.commit()
+    status = "啟用" if current_user.notifications_enabled else "禁用"
+    flash(f'通知已{status}！', 'success')
+    return redirect(url_for('home'))
+
 if __name__ == '__main__':
+    app.app_context().push()  # 确保在应用上下文中运行
+    db.create_all()  # 创建数据库表
     app.run(debug=True, port=10000, host='0.0.0.0')
