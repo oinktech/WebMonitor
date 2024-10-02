@@ -2,5 +2,6 @@ Flask
 Flask-SQLAlchemy
 Flask-Login
 Werkzeug
+pymongo
+python-dotenv
 requests
-
