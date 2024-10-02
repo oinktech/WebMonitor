@@ -72,15 +72,6 @@
                     <form method="POST" action="{{ url_for('delete_website', id=website.id) }}">
                         <button type="submit" class="btn btn-danger animated-button">刪除網站 <i class="bx bx-trash"></i></button>
                     </form>
-                    <form method="POST" action="{{ url_for('toggle_notifications', url=website.url) }}" class="mt-2">
-                        <button type="submit" class="btn btn-warning animated-button">
-                            {% if website.notifications_enabled %}
-                                <i class="bx bx-bell-off"></i> 關閉通知
-                            {% else %}
-                                <i class="bx bx-bell"></i> 開啟通知
-                            {% endif %}
-                        </button>
-                    </form>
                 </div>
             {% endfor %}
         {% else %}
