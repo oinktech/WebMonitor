@@ -96,7 +96,7 @@ def add_website():
     url = request.form.get('url')
     interval = request.form.get('interval')
 
-    if not url or not interval.isdigit():
+    if not url or not interval.isdigit() or int(interval) <= 0:
         flash('請正確填寫網站 URL 和訪問間隔！', 'danger')
         return redirect(url_for('home'))
 
@@ -104,7 +104,10 @@ def add_website():
     new_website = Website(url=url, interval=interval)
     db.session.add(new_website)
     db.session.commit()
-    threading.Thread(target=visit_website, args=(url, interval)).start()
+
+    # 启动新线程访问网站
+    threading.Thread(target=visit_website, args=(url, interval), daemon=True).start()
+
     flash('網站已添加！', 'success')
     return redirect(url_for('home'))
 
@@ -122,4 +125,4 @@ def delete_website(id):
 
 if __name__ == '__main__':
     db.create_all()  # 创建数据库表
-    app.run(debug=True,port=10000, host='0.0.0.0')
+    app.run(debug=True, port=10000, host='0.0.0.0')
