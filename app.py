@@ -26,7 +26,7 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    user_data = mongo.db.users.find_one({"_id": user_id})
+    user_data = mongo.db.users.find_one({"_id": user_id})  # Ensure user_id is used correctly
     if user_data:
         return User(username=user_data['username'], password=user_data['password'])
     return None
@@ -112,7 +112,7 @@ def add_website():
 
     interval = int(interval)
     mongo.db.websites.insert_one({"url": url, "interval": interval, "notifications_enabled": False})
-    threading.Thread(target=visit_website, args=(url, interval)).start()
+    threading.Thread(target=visit_website, args=(url, interval), daemon=True).start()  # Make thread a daemon
     flash('網站已添加！', 'success')
     return redirect(url_for('home'))
 
