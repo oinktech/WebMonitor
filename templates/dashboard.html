@@ -6,9 +6,11 @@
     <title>網站監控儀表板</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/boxicons@2.1.1/css/boxicons.min.css">
     <style>
         body {
             background-color: #f8f9fa;
+            transition: background-color 0.3s ease;
         }
         .container {
             margin-top: 30px;
@@ -22,12 +24,24 @@
             border-radius: 5px;
             padding: 15px;
             background-color: #ffffff;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .website-card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+        .animated-button {
+            transition: background-color 0.3s;
+        }
+        .animated-button:hover {
+            background-color: #0056b3;
+            color: #ffffff;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>網站監控儀表板</h2>
+        <h2 class="text-center">網站監控儀表板</h2>
         {% with messages = get_flashed_messages() %}
             {% if messages %}
                 {% for message in messages %}
@@ -46,24 +60,24 @@
                 <label for="interval">訪問間隔 (秒):</label>
                 <input type="number" class="form-control" id="interval" name="interval" required>
             </div>
-            <button type="submit" class="btn btn-primary">添加網站</button>
+            <button type="submit" class="btn btn-primary animated-button">添加網站</button>
         </form>
 
         <h4 class="mt-5">已添加的網站</h4>
-        {% if websites.count() > 0 %}
+        {% if websites | length > 0 %}
             {% for website in websites %}
                 <div class="website-card">
-                    <h5>{{ website.url }}</h5>
+                    <h5>{{ website.url }} <i class="bx bx-link-external"></i></h5>
                     <p>訪問間隔: {{ website.interval }} 秒</p>
                     <form method="POST" action="{{ url_for('delete_website', url=website.url) }}">
-                        <button type="submit" class="btn btn-danger">刪除網站</button>
+                        <button type="submit" class="btn btn-danger animated-button">刪除網站 <i class="bx bx-trash"></i></button>
                     </form>
                     <form method="POST" action="{{ url_for('toggle_notifications', url=website.url) }}" class="mt-2">
-                        <button type="submit" class="btn btn-warning">
+                        <button type="submit" class="btn btn-warning animated-button">
                             {% if website.notifications_enabled %}
-                                關閉通知
+                                <i class="bx bx-bell-off"></i> 關閉通知
                             {% else %}
-                                開啟通知
+                                <i class="bx bx-bell"></i> 開啟通知
                             {% endif %}
                         </button>
                     </form>
