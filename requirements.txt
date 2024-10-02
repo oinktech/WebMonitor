@@ -5,3 +5,4 @@ Werkzeug
 pymongo
 python-dotenv
 requests
+flask_pymongo
